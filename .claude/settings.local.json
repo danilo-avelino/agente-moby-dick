@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip --version)",
+      "Bash(py --version)",
+      "Bash(py -m pip --version)",
+      "Bash(python3 -m pip --version)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 --version)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip --version)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install -r requirements.txt --quiet)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install -r requirements.txt)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install fastapi uvicorn[standard] httpx supabase python-dotenv pyngrok psycopg[binary])",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install fastapi \"uvicorn[standard]\" httpx python-dotenv pyngrok)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install supabase)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install \"supabase==2.10.0\" --no-deps)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install \"postgrest>=0.18,<0.20\" \"gotrue>=2.11,<3\" \"httpx>=0.28,<1\" \"realtime>=2.0,<3\" \"storage3<3.0\" --no-deps)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip show supabase)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install \"postgrest>=0.18\" \"gotrue>=2.11\" \"realtime>=2.0\" \"storage3>=0.8\" --no-deps)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -c \"from supabase import create_client; print\\('supabase OK'\\)\")",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -c \"import fastapi, uvicorn, httpx, dotenv, pyngrok; print\\('all core deps OK'\\)\")",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install \"PyJWT>=2.0\" \"websockets\" \"deprecation\" \"python-dateutil\")",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip index versions storage3)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install \"storage3==0.12.2\" --force-reinstall --no-deps)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install supafunc --no-deps)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -m pip install \"psycopg[binary]\")",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3 -c ':*)",
+      "Bash(taskkill /F /IM ngrok.exe)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /F /PID 11340)",
+      "Bash(C:\\\\Users\\\\danil\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python3.exe tools/migration_add_photo.py)",
+      "Bash(\"/c/Users/danil/AppData/Local/Python/bin/python3.exe\" tools/migration_add_photo.py)",
+      "Bash(\"/c/Users/danil/AppData/Local/Python/bin/python3.exe\" -m pip install apscheduler)",
+      "Bash(/c/Users/danil/AppData/Local/Python/bin/python3.exe -c ':*)"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+# Instalação em Python 3.14:
+#   pip install -r requirements.txt
+#
+# Nota: supabase tem dependência transitiva (pyiceberg) que não compila no Py 3.14.
+# Use o script de instalação abaixo OU instale manualmente conforme install.sh
+
+fastapi
+uvicorn[standard]
+httpx
+python-dotenv
+pyngrok
+psycopg[binary]
+
+# supabase e sub-pacotes — instalar SEM deps para evitar pyiceberg:
+#   pip install supabase postgrest gotrue realtime supafunc --no-deps
+#   pip install storage3==0.12.2 --no-deps
+#   pip install PyJWT websockets deprecation python-dateutil

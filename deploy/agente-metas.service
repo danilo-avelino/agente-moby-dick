@@ -1,0 +1,19 @@
+[Unit]
+Description=Agente das Metas — Telegram Bot
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/agente-metas
+ExecStart=/opt/agente-metas/.venv/bin/python start_prod.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agente-metas
+
+# Carrega variáveis de ambiente do .env
+EnvironmentFile=/opt/agente-metas/.env
+
+[Install]
+WantedBy=multi-user.target
