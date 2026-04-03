@@ -25,6 +25,8 @@ from tools.supabase_client import (
     get_meta_summary, get_sector_report, add_occurrence,
     add_user, grant_store_access, create_new_meta, add_store, add_sectors,
     update_user_chat_id,
+    delete_user, delete_meta_config, delete_store, delete_sector,
+    get_recent_occurrences, delete_occurrence, get_all_meta_configs_with_store,
 )
 
 logger = logging.getLogger(__name__)
@@ -137,6 +139,21 @@ async def handle_message(chat_id: int, text: str, msg_type: str, photo_file_id: 
             "report_select_period":    lambda: handle_report_select_period(chat_id, user, text, data),
             "report_select_sector":    lambda: handle_report_select_sector(chat_id, user, text, data),
             "admin_menu":              lambda: handle_admin_menu(chat_id, user, text),
+            "general_report_period": lambda: handle_general_report_period(chat_id, user, text, data),
+            "del_user_select":       lambda: handle_delete_user_select(chat_id, user, text, data),
+            "del_user_confirm":      lambda: handle_delete_user_confirm(chat_id, user, text, data),
+            "del_meta_select":       lambda: handle_delete_meta_select(chat_id, user, text, data),
+            "del_meta_confirm":      lambda: handle_delete_meta_confirm(chat_id, user, text, data),
+            "del_store_select":      lambda: handle_delete_store_select(chat_id, user, text, data),
+            "del_store_confirm":     lambda: handle_delete_store_confirm(chat_id, user, text, data),
+            "del_sector_store":      lambda: handle_delete_sector_store(chat_id, user, text, data),
+            "del_sector_select":     lambda: handle_delete_sector_select(chat_id, user, text, data),
+            "del_sector_confirm":    lambda: handle_delete_sector_confirm(chat_id, user, text, data),
+            "del_occ_store":         lambda: handle_delete_occ_store(chat_id, user, text, data),
+            "del_occ_meta":          lambda: handle_delete_occ_meta(chat_id, user, text, data),
+            "del_occ_sector":        lambda: handle_delete_occ_sector(chat_id, user, text, data),
+            "del_occ_list":          lambda: handle_delete_occ_list(chat_id, user, text, data),
+            "del_occ_confirm":       lambda: handle_delete_occ_confirm(chat_id, user, text, data),
             "add_user_phone":        lambda: handle_add_user_phone(chat_id, user, text, data),
             "add_user_name":         lambda: handle_add_user_name(chat_id, user, text, data),
             "add_user_role":         lambda: handle_add_user_role(chat_id, user, text, data),
@@ -419,10 +436,20 @@ async def show_admin_menu(chat_id: int, user: dict) -> None:
         {"title": "Usuários", "rows": [
             {"id": "add_user",   "title": "👤 Cadastrar usuário"},
             {"id": "list_users", "title": "📋 Listar usuários"},
+            {"id": "del_user",   "title": "🗑️ Excluir usuário"},
         ]},
         {"title": "Metas e Lojas", "rows": [
-            {"id": "add_meta",  "title": "➕ Nova meta"},
-            {"id": "add_store", "title": "🏪 Nova loja"},
+            {"id": "add_meta",   "title": "➕ Nova meta"},
+            {"id": "add_store",  "title": "🏪 Nova loja"},
+            {"id": "del_meta",   "title": "🗑️ Excluir meta"},
+            {"id": "del_store",  "title": "🗑️ Excluir loja"},
+        ]},
+        {"title": "Setores e Apontamentos", "rows": [
+            {"id": "del_sector",     "title": "🗑️ Excluir setor"},
+            {"id": "del_occurrence", "title": "🗑️ Excluir apontamento"},
+        ]},
+        {"title": "Relatórios", "rows": [
+            {"id": "general_report", "title": "📊 Relatório Geral"},
         ]},
         {"title": "Navegação", "rows": [
             {"id": "menu_principal", "title": "🏠 Menu principal"},
@@ -437,6 +464,12 @@ async def handle_admin_menu(chat_id: int, user: dict, text: str) -> None:
         "list_users":     lambda: show_users_list(chat_id, user),
         "add_meta":       lambda: start_add_meta(chat_id, user),
         "add_store":      lambda: start_add_store(chat_id, user),
+        "del_user":       lambda: start_delete_user(chat_id, user),
+        "del_meta":       lambda: start_delete_meta(chat_id, user),
+        "del_store":      lambda: start_delete_store(chat_id, user),
+        "del_sector":     lambda: start_delete_sector(chat_id, user),
+        "del_occurrence": lambda: start_delete_occurrence(chat_id, user),
+        "general_report": lambda: start_general_report(chat_id, user),
         "menu_principal": lambda: show_main_menu(chat_id, user),
     }
     handler = routes.get(text)
@@ -883,3 +916,345 @@ async def _show_meta_type_list(chat_id: int, user: dict, store: dict, action: st
     await send_list(chat_id, f"{icon} *{store['name']}*\n\n{verb}", "Ver metas",
                     [{"title": "Metas", "rows": rows}])
     _set_session_clean(chat_id, next_state, {"store": store, "meta_configs": meta_configs})
+
+
+# ─────────────────────────────────────────────────────────
+# RELATÓRIO GERAL (Admin)
+# ─────────────────────────────────────────────────────────
+
+async def start_general_report(chat_id: int, user: dict) -> None:
+    periods = [_month_range(i) for i in range(4)]
+    rows = [{"id": f"period_{i}", "title": p[2]} for i, p in enumerate(periods)]
+    rows[0]["title"] = f"📅 {rows[0]['title']} (atual)"
+    await send_list(chat_id, "📊 *Relatório Geral*\n\nSelecione o período:", "Ver períodos",
+                    [{"title": "Períodos", "rows": rows}])
+    _set_session_clean(chat_id, "general_report_period", {"periods": periods})
+
+
+async def handle_general_report_period(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("period_"):
+        await send_text(chat_id, "Por favor, selecione um período.")
+        return
+    idx = int(text.replace("period_", ""))
+    periods = data.get("periods", [])
+    if idx >= len(periods):
+        await show_admin_menu(chat_id, user)
+        return
+    start_date, end_date, label = periods[idx]
+
+    from tools.monthly_report import _build_store_report
+    stores = get_all_stores()
+    await send_text(chat_id, f"📊 *Relatório Geral — {label}*\n")
+    for store in stores:
+        block = _build_store_report(store, start_date, end_date, label)
+        await send_text(chat_id, block)
+    await show_admin_menu(chat_id, user)
+
+
+# ─────────────────────────────────────────────────────────
+# EXCLUIR USUÁRIO
+# ─────────────────────────────────────────────────────────
+
+async def start_delete_user(chat_id: int, user: dict) -> None:
+    users = get_all_users()
+    if not users:
+        await send_text(chat_id, "Nenhum usuário cadastrado.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"deluser_{u['phone']}", "title": u["name"],
+             "description": u["phone"] + (" (admin)" if u.get("is_admin") else "")}
+            for u in users]
+    await send_list(chat_id, "🗑️ *Excluir Usuário*\n\nSelecione o usuário:", "Ver usuários",
+                    [{"title": "Usuários", "rows": rows}])
+    _set_session_clean(chat_id, "del_user_select", {"users": users})
+
+
+async def handle_delete_user_select(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("deluser_"):
+        await send_text(chat_id, "Por favor, selecione um usuário.")
+        return
+    phone = text.replace("deluser_", "")
+    users = data.get("users", [])
+    target = next((u for u in users if u["phone"] == phone), None)
+    if not target:
+        await send_text(chat_id, "Usuário não encontrado.")
+        await show_admin_menu(chat_id, user)
+        return
+    await send_buttons(chat_id,
+        f"🗑️ *Excluir usuário?*\n\nNome: {target['name']}\nTelefone: {target['phone']}\n\n"
+        "⚠️ Esta ação não pode ser desfeita.",
+        [{"id": "del_confirm_yes", "title": "✅ Confirmar exclusão"},
+         {"id": "del_confirm_no",  "title": "❌ Cancelar"}])
+    _set_session_clean(chat_id, "del_user_confirm", {"target_phone": phone, "target_name": target["name"]})
+
+
+async def handle_delete_user_confirm(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if text == "del_confirm_yes":
+        delete_user(data["target_phone"])
+        await send_text(chat_id, f"✅ Usuário *{data['target_name']}* excluído.")
+    else:
+        await send_text(chat_id, "❌ Exclusão cancelada.")
+    await show_admin_menu(chat_id, user)
+
+
+# ─────────────────────────────────────────────────────────
+# EXCLUIR META
+# ─────────────────────────────────────────────────────────
+
+async def start_delete_meta(chat_id: int, user: dict) -> None:
+    metas = get_all_meta_configs_with_store()
+    if not metas:
+        await send_text(chat_id, "Nenhuma meta cadastrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"delmeta_{m['id']}", "title": m["display_name"],
+             "description": m.get("bot_stores", {}).get("name", "") if m.get("bot_stores") else ""}
+            for m in metas]
+    await send_list(chat_id, "🗑️ *Excluir Meta*\n\nSelecione a meta:", "Ver metas",
+                    [{"title": "Metas", "rows": rows}])
+    _set_session_clean(chat_id, "del_meta_select", {"metas": metas})
+
+
+async def handle_delete_meta_select(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("delmeta_"):
+        await send_text(chat_id, "Por favor, selecione uma meta.")
+        return
+    meta_id = int(text.replace("delmeta_", ""))
+    metas = data.get("metas", [])
+    target = next((m for m in metas if m["id"] == meta_id), None)
+    if not target:
+        await send_text(chat_id, "Meta não encontrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    store_name = target.get("bot_stores", {}).get("name", "") if target.get("bot_stores") else ""
+    await send_buttons(chat_id,
+        f"🗑️ *Excluir meta?*\n\nMeta: {target['display_name']}\nLoja: {store_name}\n\n"
+        "⚠️ Todos os apontamentos desta meta serão excluídos permanentemente.",
+        [{"id": "del_confirm_yes", "title": "✅ Confirmar exclusão"},
+         {"id": "del_confirm_no",  "title": "❌ Cancelar"}])
+    _set_session_clean(chat_id, "del_meta_confirm",
+                       {"target_id": meta_id, "target_name": target["display_name"],
+                        "table_name": target["table_name"]})
+
+
+async def handle_delete_meta_confirm(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if text == "del_confirm_yes":
+        delete_meta_config(data["target_id"], data["table_name"])
+        await send_text(chat_id, f"✅ Meta *{data['target_name']}* excluída.")
+    else:
+        await send_text(chat_id, "❌ Exclusão cancelada.")
+    await show_admin_menu(chat_id, user)
+
+
+# ─────────────────────────────────────────────────────────
+# EXCLUIR LOJA
+# ─────────────────────────────────────────────────────────
+
+async def start_delete_store(chat_id: int, user: dict) -> None:
+    stores = get_all_stores()
+    if not stores:
+        await send_text(chat_id, "Nenhuma loja cadastrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"delstore_{s['id']}", "title": s["name"]} for s in stores]
+    await send_list(chat_id, "🗑️ *Excluir Loja*\n\nSelecione a loja:", "Ver lojas",
+                    [{"title": "Lojas", "rows": rows}])
+    _set_session_clean(chat_id, "del_store_select", {"stores": stores})
+
+
+async def handle_delete_store_select(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("delstore_"):
+        await send_text(chat_id, "Por favor, selecione uma loja.")
+        return
+    store_id = int(text.replace("delstore_", ""))
+    stores = data.get("stores", [])
+    target = next((s for s in stores if s["id"] == store_id), None)
+    if not target:
+        await send_text(chat_id, "Loja não encontrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    await send_buttons(chat_id,
+        f"🗑️ *Excluir loja?*\n\nLoja: {target['name']}\n\n"
+        "⚠️ Todos os setores, metas e acessos desta loja serão excluídos.",
+        [{"id": "del_confirm_yes", "title": "✅ Confirmar exclusão"},
+         {"id": "del_confirm_no",  "title": "❌ Cancelar"}])
+    _set_session_clean(chat_id, "del_store_confirm",
+                       {"target_id": store_id, "target_name": target["name"]})
+
+
+async def handle_delete_store_confirm(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if text == "del_confirm_yes":
+        delete_store(data["target_id"])
+        await send_text(chat_id, f"✅ Loja *{data['target_name']}* excluída.")
+    else:
+        await send_text(chat_id, "❌ Exclusão cancelada.")
+    await show_admin_menu(chat_id, user)
+
+
+# ─────────────────────────────────────────────────────────
+# EXCLUIR SETOR
+# ─────────────────────────────────────────────────────────
+
+async def start_delete_sector(chat_id: int, user: dict) -> None:
+    stores = get_all_stores()
+    if not stores:
+        await send_text(chat_id, "Nenhuma loja cadastrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"store_{s['id']}", "title": s["name"]} for s in stores]
+    await send_list(chat_id, "🗑️ *Excluir Setor*\n\nSelecione a loja:", "Ver lojas",
+                    [{"title": "Lojas", "rows": rows}])
+    _set_session_clean(chat_id, "del_sector_store", {"stores": stores})
+
+
+async def handle_delete_sector_store(chat_id: int, user: dict, text: str, data: dict) -> None:
+    store = _find_store(text, data.get("stores", []))
+    if not store:
+        await send_text(chat_id, "Por favor, selecione uma loja.")
+        return
+    sectors = get_sectors_for_store(store["id"])
+    if not sectors:
+        await send_text(chat_id, f"⚠️ Nenhum setor cadastrado em *{store['name']}*.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"delsector_{s['id']}", "title": s["name"]} for s in sectors]
+    await send_list(chat_id, f"🗑️ *{store['name']}*\n\nSelecione o setor a excluir:", "Ver setores",
+                    [{"title": "Setores", "rows": rows}])
+    _set_session_clean(chat_id, "del_sector_select", {"store": store, "sectors": sectors})
+
+
+async def handle_delete_sector_select(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("delsector_"):
+        await send_text(chat_id, "Por favor, selecione um setor.")
+        return
+    sector_id = int(text.replace("delsector_", ""))
+    sectors = data.get("sectors", [])
+    target = next((s for s in sectors if s["id"] == sector_id), None)
+    if not target:
+        await send_text(chat_id, "Setor não encontrado.")
+        await show_admin_menu(chat_id, user)
+        return
+    store = data.get("store", {})
+    await send_buttons(chat_id,
+        f"🗑️ *Excluir setor?*\n\nSetor: {target['name']}\nLoja: {store.get('name', '')}\n\n"
+        "⚠️ O setor será removido de todas as metas vinculadas.",
+        [{"id": "del_confirm_yes", "title": "✅ Confirmar exclusão"},
+         {"id": "del_confirm_no",  "title": "❌ Cancelar"}])
+    _set_session_clean(chat_id, "del_sector_confirm",
+                       {"target_id": sector_id, "target_name": target["name"]})
+
+
+async def handle_delete_sector_confirm(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if text == "del_confirm_yes":
+        delete_sector(data["target_id"])
+        await send_text(chat_id, f"✅ Setor *{data['target_name']}* excluído.")
+    else:
+        await send_text(chat_id, "❌ Exclusão cancelada.")
+    await show_admin_menu(chat_id, user)
+
+
+# ─────────────────────────────────────────────────────────
+# EXCLUIR APONTAMENTO
+# ─────────────────────────────────────────────────────────
+
+async def start_delete_occurrence(chat_id: int, user: dict) -> None:
+    stores = get_all_stores()
+    if not stores:
+        await send_text(chat_id, "Nenhuma loja cadastrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"store_{s['id']}", "title": s["name"]} for s in stores]
+    await send_list(chat_id, "🗑️ *Excluir Apontamento*\n\nSelecione a loja:", "Ver lojas",
+                    [{"title": "Lojas", "rows": rows}])
+    _set_session_clean(chat_id, "del_occ_store", {"stores": stores})
+
+
+async def handle_delete_occ_store(chat_id: int, user: dict, text: str, data: dict) -> None:
+    store = _find_store(text, data.get("stores", []))
+    if not store:
+        await send_text(chat_id, "Por favor, selecione uma loja.")
+        return
+    metas = get_meta_configs(store["id"])
+    if not metas:
+        await send_text(chat_id, f"⚠️ Nenhuma meta em *{store['name']}*.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"meta_{m['id']}", "title": m["display_name"]} for m in metas]
+    await send_list(chat_id, f"🗑️ *{store['name']}*\n\nSelecione a meta:", "Ver metas",
+                    [{"title": "Metas", "rows": rows}])
+    _set_session_clean(chat_id, "del_occ_meta", {"store": store, "meta_configs": metas})
+
+
+async def handle_delete_occ_meta(chat_id: int, user: dict, text: str, data: dict) -> None:
+    meta = _find_item(text, data.get("meta_configs", []), "meta_")
+    if not meta:
+        await send_text(chat_id, "Por favor, selecione uma meta.")
+        return
+    sectors = get_sectors_for_meta(meta["id"])
+    if not sectors:
+        await send_text(chat_id, "⚠️ Nenhum setor vinculado a esta meta.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"sector_{s['id']}", "title": s["name"]} for s in sectors]
+    await send_list(chat_id, f"🗑️ *{meta['display_name']}*\n\nSelecione o setor:", "Ver setores",
+                    [{"title": "Setores", "rows": rows}])
+    _set_session_clean(chat_id, "del_occ_sector",
+                       {"store": data.get("store"), "meta": meta, "sectors": sectors})
+
+
+async def handle_delete_occ_sector(chat_id: int, user: dict, text: str, data: dict) -> None:
+    sector = _find_item(text, data.get("sectors", []), "sector_")
+    if not sector:
+        await send_text(chat_id, "Por favor, selecione um setor.")
+        return
+    meta = data["meta"]
+    occurrences = get_recent_occurrences(meta["table_name"], meta["id"], sector["id"], limit=10)
+    if not occurrences:
+        await send_text(chat_id, "⚠️ Nenhum apontamento encontrado para este setor/meta.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = []
+    for occ in occurrences:
+        title = occ["occurrence_date"]
+        desc = occ.get("notes") or occ.get("reported_by") or ""
+        rows.append({"id": f"occ_{occ['id']}", "title": title, "description": desc[:30] if desc else ""})
+    await send_list(chat_id,
+        f"🗑️ *{meta['display_name']} — {sector['name']}*\n\nSelecione o apontamento a excluir:",
+        "Ver apontamentos", [{"title": "Apontamentos recentes", "rows": rows}])
+    _set_session_clean(chat_id, "del_occ_list",
+                       {"meta": meta, "sector": sector, "occurrences": occurrences})
+
+
+async def handle_delete_occ_list(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("occ_"):
+        await send_text(chat_id, "Por favor, selecione um apontamento.")
+        return
+    occ_id = int(text.replace("occ_", ""))
+    occurrences = data.get("occurrences", [])
+    target = next((o for o in occurrences if o["id"] == occ_id), None)
+    if not target:
+        await send_text(chat_id, "Apontamento não encontrado.")
+        await show_admin_menu(chat_id, user)
+        return
+    meta = data["meta"]
+    sector = data["sector"]
+    notes_line = f"\nObservação: {target['notes']}" if target.get("notes") else ""
+    await send_buttons(chat_id,
+        f"🗑️ *Excluir apontamento?*\n\n"
+        f"Meta: {meta['display_name']}\nSetor: {sector['name']}\n"
+        f"Data: {target['occurrence_date']}{notes_line}\n\n"
+        "⚠️ Esta ação não pode ser desfeita.",
+        [{"id": "del_confirm_yes", "title": "✅ Confirmar exclusão"},
+         {"id": "del_confirm_no",  "title": "❌ Cancelar"}])
+    _set_session_clean(chat_id, "del_occ_confirm",
+                       {"occ_id": occ_id, "table_name": meta["table_name"],
+                        "date": target["occurrence_date"]})
+
+
+async def handle_delete_occ_confirm(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if text == "del_confirm_yes":
+        delete_occurrence(data["table_name"], data["occ_id"])
+        await send_text(chat_id, f"✅ Apontamento de *{data['date']}* excluído.")
+    else:
+        await send_text(chat_id, "❌ Exclusão cancelada.")
+    await show_admin_menu(chat_id, user)

@@ -223,6 +223,73 @@ def update_user_chat_id(phone: str, chat_id: int) -> None:
     ).eq("phone", phone).execute()
 
 
+# ─────────────────────────────────────────────────────────
+# EXCLUSÕES (Admin)
+# ─────────────────────────────────────────────────────────
+
+def delete_user(phone: str) -> None:
+    get_client().table("bot_user_store_access").delete().eq("user_phone", phone).execute()
+    get_client().table("bot_users").delete().eq("phone", phone).execute()
+
+
+def delete_meta_config(meta_config_id: int, table_name: str) -> None:
+    import psycopg
+    get_client().table("bot_meta_sectors").delete().eq("meta_config_id", meta_config_id).execute()
+    get_client().table("bot_meta_configs").delete().eq("id", meta_config_id).execute()
+    db_url = os.getenv("SUPABASE_DB_URL")
+    if db_url and table_name.startswith("bot_records_"):
+        with psycopg.connect(db_url) as conn:
+            conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+            conn.commit()
+
+
+def delete_store(store_id: int) -> None:
+    metas = get_client().table("bot_meta_configs").select("id").eq("store_id", store_id).execute().data
+    for meta in metas:
+        get_client().table("bot_meta_sectors").delete().eq("meta_config_id", meta["id"]).execute()
+    get_client().table("bot_meta_configs").delete().eq("store_id", store_id).execute()
+    sectors = get_client().table("bot_sectors").select("id").eq("store_id", store_id).execute().data
+    for sector in sectors:
+        get_client().table("bot_meta_sectors").delete().eq("sector_id", sector["id"]).execute()
+    get_client().table("bot_sectors").delete().eq("store_id", store_id).execute()
+    get_client().table("bot_user_store_access").delete().eq("store_id", store_id).execute()
+    get_client().table("bot_stores").delete().eq("id", store_id).execute()
+
+
+def delete_sector(sector_id: int) -> None:
+    get_client().table("bot_meta_sectors").delete().eq("sector_id", sector_id).execute()
+    get_client().table("bot_sectors").delete().eq("id", sector_id).execute()
+
+
+def get_recent_occurrences(table_name: str, meta_config_id: int, sector_id: int, limit: int = 10) -> list[dict]:
+    result = (
+        get_client()
+        .table(table_name)
+        .select("id, occurrence_date, reported_by, notes")
+        .eq("meta_config_id", meta_config_id)
+        .eq("sector_id", sector_id)
+        .order("occurrence_date", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return result.data
+
+
+def delete_occurrence(table_name: str, record_id: int) -> None:
+    get_client().table(table_name).delete().eq("id", record_id).execute()
+
+
+def get_all_meta_configs_with_store() -> list[dict]:
+    result = (
+        get_client()
+        .table("bot_meta_configs")
+        .select("*, bot_stores(id, name)")
+        .order("display_name")
+        .execute()
+    )
+    return result.data
+
+
 def create_new_meta(
     store_id: int,
     name: str,
