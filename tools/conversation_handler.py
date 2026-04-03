@@ -27,6 +27,7 @@ from tools.supabase_client import (
     update_user_chat_id,
     delete_user, delete_meta_config, delete_store, delete_sector,
     get_recent_occurrences, delete_occurrence, get_all_meta_configs_with_store,
+    update_meta_target,
 )
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,8 @@ async def handle_message(chat_id: int, text: str, msg_type: str, photo_file_id: 
             "report_select_sector":    lambda: handle_report_select_sector(chat_id, user, text, data),
             "admin_menu":              lambda: handle_admin_menu(chat_id, user, text),
             "general_report_period": lambda: handle_general_report_period(chat_id, user, text, data),
+            "edit_meta_select":      lambda: handle_edit_meta_select(chat_id, user, text, data),
+            "edit_meta_target":      lambda: handle_edit_meta_target(chat_id, user, text, data),
             "del_user_select":       lambda: handle_delete_user_select(chat_id, user, text, data),
             "del_user_confirm":      lambda: handle_delete_user_confirm(chat_id, user, text, data),
             "del_meta_select":       lambda: handle_delete_meta_select(chat_id, user, text, data),
@@ -441,6 +444,7 @@ async def show_admin_menu(chat_id: int, user: dict) -> None:
         {"title": "Metas e Lojas", "rows": [
             {"id": "add_meta",   "title": "➕ Nova meta"},
             {"id": "add_store",  "title": "🏪 Nova loja"},
+            {"id": "edit_meta",  "title": "✏️ Alterar limite de meta"},
             {"id": "del_meta",   "title": "🗑️ Excluir meta"},
             {"id": "del_store",  "title": "🗑️ Excluir loja"},
         ]},
@@ -464,6 +468,7 @@ async def handle_admin_menu(chat_id: int, user: dict, text: str) -> None:
         "list_users":     lambda: show_users_list(chat_id, user),
         "add_meta":       lambda: start_add_meta(chat_id, user),
         "add_store":      lambda: start_add_store(chat_id, user),
+        "edit_meta":      lambda: start_edit_meta(chat_id, user),
         "del_user":       lambda: start_delete_user(chat_id, user),
         "del_meta":       lambda: start_delete_meta(chat_id, user),
         "del_store":      lambda: start_delete_store(chat_id, user),
@@ -948,6 +953,67 @@ async def handle_general_report_period(chat_id: int, user: dict, text: str, data
     for store in stores:
         block = _build_store_report(store, start_date, end_date, label)
         await send_text(chat_id, block)
+    await show_admin_menu(chat_id, user)
+
+
+# ─────────────────────────────────────────────────────────
+# ALTERAR LIMITE DE META
+# ─────────────────────────────────────────────────────────
+
+async def start_edit_meta(chat_id: int, user: dict) -> None:
+    metas = get_all_meta_configs_with_store()
+    if not metas:
+        await send_text(chat_id, "Nenhuma meta cadastrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"editmeta_{m['id']}", "title": m["display_name"],
+             "description": f"Limite atual: ≤{m['target_value']} | " +
+                            (m.get("bot_stores", {}).get("name", "") if m.get("bot_stores") else "")}
+            for m in metas]
+    await send_list(chat_id, "✏️ *Alterar Limite de Meta*\n\nSelecione a meta:", "Ver metas",
+                    [{"title": "Metas", "rows": rows}])
+    _set_session_clean(chat_id, "edit_meta_select", {"metas": metas})
+
+
+async def handle_edit_meta_select(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("editmeta_"):
+        await send_text(chat_id, "Por favor, selecione uma meta.")
+        return
+    meta_id = int(text.replace("editmeta_", ""))
+    metas = data.get("metas", [])
+    target = next((m for m in metas if m["id"] == meta_id), None)
+    if not target:
+        await send_text(chat_id, "Meta não encontrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    await send_text(chat_id,
+        f"✏️ *{target['display_name']}*\n"
+        f"Limite atual: ≤{target['target_value']} ocorrências\n\n"
+        "Digite o *novo limite* máximo de ocorrências:\n_(Ex: *1*)_\n\n"
+        "Digite *cancelar* para voltar.")
+    _set_session_clean(chat_id, "edit_meta_target",
+                       {"meta_id": meta_id, "meta_name": target["display_name"],
+                        "old_target": target["target_value"]})
+
+
+async def handle_edit_meta_target(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if text.lower() == "cancelar":
+        await show_admin_menu(chat_id, user)
+        return
+    try:
+        new_target = int(text.strip())
+        if new_target < 0:
+            raise ValueError
+    except ValueError:
+        await send_text(chat_id, "❌ Digite apenas um número inteiro positivo. Ex: *1*")
+        return
+    update_meta_target(data["meta_id"], new_target)
+    await send_text(chat_id,
+        f"✅ *Meta atualizada!*\n\n"
+        f"Meta: {data['meta_name']}\n"
+        f"Limite anterior: ≤{data['old_target']}\n"
+        f"Novo limite: ≤{new_target}\n\n"
+        "_Os apontamentos existentes não foram alterados._")
     await show_admin_menu(chat_id, user)
 
 

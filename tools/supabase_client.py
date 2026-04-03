@@ -227,6 +227,12 @@ def update_user_chat_id(phone: str, chat_id: int) -> None:
 # EXCLUSÕES (Admin)
 # ─────────────────────────────────────────────────────────
 
+def update_meta_target(meta_config_id: int, new_target: int) -> None:
+    get_client().table("bot_meta_configs").update(
+        {"target_value": new_target}
+    ).eq("id", meta_config_id).execute()
+
+
 def delete_user(phone: str) -> None:
     get_client().table("bot_user_store_access").delete().eq("user_phone", phone).execute()
     get_client().table("bot_users").delete().eq("phone", phone).execute()
