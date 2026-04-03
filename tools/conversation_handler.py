@@ -17,7 +17,7 @@ from datetime import datetime, date
 
 from tools.telegram_client import (
     send_text, send_buttons, send_list,
-    request_phone, remove_keyboard,
+    request_phone, remove_keyboard, send_photo,
 )
 from tools.supabase_client import (
     get_user, get_all_users, get_all_stores, get_user_stores,
@@ -155,6 +155,8 @@ async def handle_message(chat_id: int, text: str, msg_type: str, photo_file_id: 
             "del_meta_confirm":      lambda: handle_delete_meta_confirm(chat_id, user, text, data),
             "del_store_select":      lambda: handle_delete_store_select(chat_id, user, text, data),
             "del_store_confirm":     lambda: handle_delete_store_confirm(chat_id, user, text, data),
+            "add_sector_store":      lambda: handle_add_sector_store(chat_id, user, text, data),
+            "add_sector_name":       lambda: handle_add_sector_name(chat_id, user, text, data),
             "del_sector_store":      lambda: handle_delete_sector_store(chat_id, user, text, data),
             "del_sector_select":     lambda: handle_delete_sector_select(chat_id, user, text, data),
             "del_sector_confirm":    lambda: handle_delete_sector_confirm(chat_id, user, text, data),
@@ -394,7 +396,9 @@ async def handle_apontar_extras(chat_id: int, user: dict, text: str, data: dict)
         _set_session_clean(chat_id, "apontar_extras_waiting")
     else:
         meta, sector = data["meta"], data["sector"]
+        store = data.get("store", {})
         add_occurrence(meta["table_name"], meta["id"], sector["id"], user["phone"])
+        await _notify_admins_occurrence(user, store, meta, sector, None, None, chat_id)
         await _apontar_success(chat_id, user, meta, sector)
 
 
@@ -406,12 +410,48 @@ async def handle_apontar_extras_waiting(
         await send_text(chat_id, "⚠️ Envie texto e/ou foto.")
         return
     meta, sector = data["meta"], data["sector"]
+    store = data.get("store", {})
     notes = text if text else None
     add_occurrence(
         meta["table_name"], meta["id"], sector["id"], user["phone"],
         notes=notes, photo_file_id=photo_file_id,
     )
+    await _notify_admins_occurrence(user, store, meta, sector, notes, photo_file_id, chat_id)
     await _apontar_success(chat_id, user, meta, sector, notes=notes, has_photo=bool(photo_file_id))
+
+
+async def _notify_admins_occurrence(
+    reporter: dict, store: dict, meta: dict, sector: dict,
+    notes: str | None, photo_file_id: str | None,
+    skip_chat_id: int,
+) -> None:
+    """Envia notificação de novo apontamento para todos os admins (exceto quem apontou)."""
+    from datetime import date
+    admins = [u for u in get_all_users()
+              if u.get("is_admin") and u.get("telegram_chat_id")
+              and u["telegram_chat_id"] != skip_chat_id]
+    if not admins:
+        return
+
+    msg = (
+        f"🔔 *Novo apontamento registrado*\n\n"
+        f"Loja: {store['name']}\n"
+        f"Meta: {meta['display_name']}\n"
+        f"Setor: {sector['name']}\n"
+        f"Data: {date.today().strftime('%d/%m/%Y')}\n"
+        f"Por: {reporter.get('name', reporter.get('phone', ''))}"
+    )
+    if notes:
+        msg += f"\nObservação: _{notes}_"
+
+    for admin in admins:
+        try:
+            if photo_file_id:
+                await send_photo(admin["telegram_chat_id"], photo_file_id, caption=msg)
+            else:
+                await send_text(admin["telegram_chat_id"], msg)
+        except Exception as e:
+            logger.error(f"Erro ao notificar admin {admin['name']}: {e}")
 
 
 async def _apontar_success(
@@ -456,6 +496,7 @@ async def show_admin_menu(chat_id: int, user: dict) -> None:
             {"id": "del_store",  "title": "🗑️ Excluir loja"},
         ]},
         {"title": "Setores e Apontamentos", "rows": [
+            {"id": "add_sector",     "title": "➕ Criar setor"},
             {"id": "del_sector",     "title": "🗑️ Excluir setor"},
             {"id": "del_occurrence", "title": "🗑️ Excluir apontamento"},
         ]},
@@ -480,6 +521,7 @@ async def handle_admin_menu(chat_id: int, user: dict, text: str) -> None:
         "del_user":       lambda: start_delete_user(chat_id, user),
         "del_meta":       lambda: start_delete_meta(chat_id, user),
         "del_store":      lambda: start_delete_store(chat_id, user),
+        "add_sector":     lambda: start_add_sector(chat_id, user),
         "del_sector":     lambda: start_delete_sector(chat_id, user),
         "del_occurrence": lambda: start_delete_occurrence(chat_id, user),
         "general_report": lambda: start_general_report(chat_id, user),
@@ -1292,6 +1334,61 @@ async def handle_delete_store_confirm(chat_id: int, user: dict, text: str, data:
         await send_text(chat_id, f"✅ Loja *{data['target_name']}* excluída.")
     else:
         await send_text(chat_id, "❌ Exclusão cancelada.")
+    await show_admin_menu(chat_id, user)
+
+
+# ─────────────────────────────────────────────────────────
+# CRIAR SETOR
+# ─────────────────────────────────────────────────────────
+
+async def start_add_sector(chat_id: int, user: dict) -> None:
+    stores = get_all_stores()
+    if not stores:
+        await send_text(chat_id, "Nenhuma loja cadastrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"store_{s['id']}", "title": s["name"]} for s in stores]
+    await send_list(chat_id, "➕ *Criar Setor*\n\nPara qual loja?", "Ver lojas",
+                    [{"title": "Lojas", "rows": rows}])
+    _set_session_clean(chat_id, "add_sector_store", {"stores": stores})
+
+
+async def handle_add_sector_store(chat_id: int, user: dict, text: str, data: dict) -> None:
+    store = _find_store(text, data.get("stores", []))
+    if not store:
+        await send_text(chat_id, "Por favor, selecione uma loja.")
+        return
+    existing = get_sectors_for_store(store["id"])
+    existing_list = "\n".join(f"• {s['name']}" for s in existing) if existing else "_Nenhum setor ainda_"
+    await send_text(chat_id,
+        f"➕ *Criar Setor — {store['name']}*\n\n"
+        f"Setores existentes:\n{existing_list}\n\n"
+        "Digite os nomes dos novos setores separados por vírgula:\n"
+        "_(Ex: Gerência, Expedição)_\n\n"
+        "Digite *cancelar* para voltar.")
+    _set_session_clean(chat_id, "add_sector_name", {"store": store})
+
+
+async def handle_add_sector_name(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if text.lower() == "cancelar":
+        await show_admin_menu(chat_id, user)
+        return
+    names = [n.strip() for n in text.split(",") if n.strip()]
+    if not names:
+        await send_text(chat_id, "❌ Digite pelo menos um nome. Ex: *Gerência, Expedição*")
+        return
+    store = data["store"]
+    created = add_sectors(store["id"], names)
+    if not created:
+        await send_text(chat_id, "❌ Erro ao criar setores. Tente novamente.")
+        await show_admin_menu(chat_id, user)
+        return
+    names_str = ", ".join(s["name"] for s in created)
+    await send_text(chat_id,
+        f"✅ *{len(created)} setor(es) criado(s)!*\n\n"
+        f"Loja: {store['name']}\n"
+        f"Setores: {names_str}\n\n"
+        "_Use 🔗 Gerenciar setores de meta para vinculá-los às metas._")
     await show_admin_menu(chat_id, user)
 
 

@@ -91,6 +91,15 @@ async def remove_keyboard(chat_id: int) -> None:
     })
 
 
+async def send_photo(chat_id: int, file_id: str, caption: str = "") -> None:
+    await _post("sendPhoto", {
+        "chat_id": chat_id,
+        "photo": file_id,
+        "caption": caption,
+        "parse_mode": "Markdown",
+    })
+
+
 async def answer_callback(callback_query_id: str) -> None:
     """Confirma o clique em botão inline (evita loading no Telegram)."""
     await _post("answerCallbackQuery", {"callback_query_id": callback_query_id})
