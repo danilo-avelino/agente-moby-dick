@@ -28,6 +28,7 @@ from tools.supabase_client import (
     delete_user, delete_meta_config, delete_store, delete_sector,
     get_recent_occurrences, delete_occurrence, get_all_meta_configs_with_store,
     update_meta_target,
+    link_sector_to_meta, unlink_sector_from_meta,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,8 +142,13 @@ async def handle_message(chat_id: int, text: str, msg_type: str, photo_file_id: 
             "report_select_sector":    lambda: handle_report_select_sector(chat_id, user, text, data),
             "admin_menu":              lambda: handle_admin_menu(chat_id, user, text),
             "general_report_period": lambda: handle_general_report_period(chat_id, user, text, data),
-            "edit_meta_select":      lambda: handle_edit_meta_select(chat_id, user, text, data),
-            "edit_meta_target":      lambda: handle_edit_meta_target(chat_id, user, text, data),
+            "edit_meta_select":        lambda: handle_edit_meta_select(chat_id, user, text, data),
+            "edit_meta_target":        lambda: handle_edit_meta_target(chat_id, user, text, data),
+            "msm_select_meta":         lambda: handle_msm_select_meta(chat_id, user, text, data),
+            "msm_action":              lambda: handle_msm_action(chat_id, user, text, data),
+            "msm_add_sector":          lambda: handle_msm_add_sector(chat_id, user, text, data),
+            "msm_remove_sector":       lambda: handle_msm_remove_sector(chat_id, user, text, data),
+            "msm_remove_confirm":      lambda: handle_msm_remove_confirm(chat_id, user, text, data),
             "del_user_select":       lambda: handle_delete_user_select(chat_id, user, text, data),
             "del_user_confirm":      lambda: handle_delete_user_confirm(chat_id, user, text, data),
             "del_meta_select":       lambda: handle_delete_meta_select(chat_id, user, text, data),
@@ -444,7 +450,8 @@ async def show_admin_menu(chat_id: int, user: dict) -> None:
         {"title": "Metas e Lojas", "rows": [
             {"id": "add_meta",   "title": "➕ Nova meta"},
             {"id": "add_store",  "title": "🏪 Nova loja"},
-            {"id": "edit_meta",  "title": "✏️ Alterar limite de meta"},
+            {"id": "edit_meta",    "title": "✏️ Alterar limite de meta"},
+            {"id": "manage_sectors_meta", "title": "🔗 Gerenciar setores de meta"},
             {"id": "del_meta",   "title": "🗑️ Excluir meta"},
             {"id": "del_store",  "title": "🗑️ Excluir loja"},
         ]},
@@ -468,7 +475,8 @@ async def handle_admin_menu(chat_id: int, user: dict, text: str) -> None:
         "list_users":     lambda: show_users_list(chat_id, user),
         "add_meta":       lambda: start_add_meta(chat_id, user),
         "add_store":      lambda: start_add_store(chat_id, user),
-        "edit_meta":      lambda: start_edit_meta(chat_id, user),
+        "edit_meta":            lambda: start_edit_meta(chat_id, user),
+        "manage_sectors_meta":  lambda: start_manage_meta_sectors(chat_id, user),
         "del_user":       lambda: start_delete_user(chat_id, user),
         "del_meta":       lambda: start_delete_meta(chat_id, user),
         "del_store":      lambda: start_delete_store(chat_id, user),
@@ -1014,6 +1022,136 @@ async def handle_edit_meta_target(chat_id: int, user: dict, text: str, data: dic
         f"Limite anterior: ≤{data['old_target']}\n"
         f"Novo limite: ≤{new_target}\n\n"
         "_Os apontamentos existentes não foram alterados._")
+    await show_admin_menu(chat_id, user)
+
+
+# ─────────────────────────────────────────────────────────
+# GERENCIAR SETORES DE META (vincular / desvincular)
+# ─────────────────────────────────────────────────────────
+
+async def start_manage_meta_sectors(chat_id: int, user: dict) -> None:
+    metas = get_all_meta_configs_with_store()
+    if not metas:
+        await send_text(chat_id, "Nenhuma meta cadastrada.")
+        await show_admin_menu(chat_id, user)
+        return
+    rows = [{"id": f"msm_{m['id']}", "title": m["display_name"],
+             "description": m.get("bot_stores", {}).get("name", "") if m.get("bot_stores") else ""}
+            for m in metas]
+    await send_list(chat_id, "🔗 *Gerenciar Setores de Meta*\n\nSelecione a meta:", "Ver metas",
+                    [{"title": "Metas", "rows": rows}])
+    _set_session_clean(chat_id, "msm_select_meta", {"metas": metas})
+
+
+async def handle_msm_select_meta(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("msm_"):
+        await send_text(chat_id, "Por favor, selecione uma meta.")
+        return
+    meta_id = int(text.replace("msm_", ""))
+    metas = data.get("metas", [])
+    meta = next((m for m in metas if m["id"] == meta_id), None)
+    if not meta:
+        await show_admin_menu(chat_id, user)
+        return
+
+    linked = get_sectors_for_meta(meta_id)
+    store_id = meta["store_id"]
+    all_sectors = get_sectors_for_store(store_id)
+    linked_ids = {s["id"] for s in linked}
+    unlinked = [s for s in all_sectors if s["id"] not in linked_ids]
+
+    linked_names = ", ".join(s["name"] for s in linked) or "_nenhum_"
+    msg = (
+        f"🔗 *{meta['display_name']}*\n\n"
+        f"Setores vinculados: {linked_names}\n\n"
+        "O que deseja fazer?"
+    )
+    buttons = []
+    if unlinked:
+        buttons.append({"id": "msm_add", "title": "➕ Vincular setor"})
+    if linked:
+        buttons.append({"id": "msm_remove", "title": "➖ Desvincular setor"})
+    buttons.append({"id": "msm_back", "title": "↩️ Voltar"})
+
+    await send_buttons(chat_id, msg, buttons)
+    _set_session_clean(chat_id, "msm_action",
+                       {"meta": meta, "linked": linked, "unlinked": unlinked})
+
+
+async def handle_msm_action(chat_id: int, user: dict, text: str, data: dict) -> None:
+    meta = data["meta"]
+    if text == "msm_add":
+        unlinked = data.get("unlinked", [])
+        if not unlinked:
+            await send_text(chat_id, "Todos os setores já estão vinculados.")
+            await show_admin_menu(chat_id, user)
+            return
+        rows = [{"id": f"addsc_{s['id']}", "title": s["name"]} for s in unlinked]
+        await send_list(chat_id,
+            f"➕ *Vincular setor à meta {meta['display_name']}*\n\nSelecione o setor:",
+            "Ver setores", [{"title": "Setores disponíveis", "rows": rows}])
+        _set_session_clean(chat_id, "msm_add_sector", {"meta": meta, "unlinked": unlinked})
+
+    elif text == "msm_remove":
+        linked = data.get("linked", [])
+        if not linked:
+            await send_text(chat_id, "Nenhum setor vinculado para remover.")
+            await show_admin_menu(chat_id, user)
+            return
+        rows = [{"id": f"rmsc_{s['id']}", "title": s["name"]} for s in linked]
+        await send_list(chat_id,
+            f"➖ *Desvincular setor da meta {meta['display_name']}*\n\nSelecione o setor:",
+            "Ver setores", [{"title": "Setores vinculados", "rows": rows}])
+        _set_session_clean(chat_id, "msm_remove_sector", {"meta": meta, "linked": linked})
+
+    else:
+        await show_admin_menu(chat_id, user)
+
+
+async def handle_msm_add_sector(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("addsc_"):
+        await send_text(chat_id, "Por favor, selecione um setor.")
+        return
+    sector_id = int(text.replace("addsc_", ""))
+    unlinked = data.get("unlinked", [])
+    sector = next((s for s in unlinked if s["id"] == sector_id), None)
+    if not sector:
+        await show_admin_menu(chat_id, user)
+        return
+    meta = data["meta"]
+    link_sector_to_meta(meta["id"], sector_id)
+    await send_text(chat_id,
+        f"✅ Setor *{sector['name']}* vinculado à meta *{meta['display_name']}*.")
+    await show_admin_menu(chat_id, user)
+
+
+async def handle_msm_remove_sector(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if not text.startswith("rmsc_"):
+        await send_text(chat_id, "Por favor, selecione um setor.")
+        return
+    sector_id = int(text.replace("rmsc_", ""))
+    linked = data.get("linked", [])
+    sector = next((s for s in linked if s["id"] == sector_id), None)
+    if not sector:
+        await show_admin_menu(chat_id, user)
+        return
+    meta = data["meta"]
+    await send_buttons(chat_id,
+        f"➖ *Desvincular setor?*\n\nMeta: {meta['display_name']}\nSetor: {sector['name']}\n\n"
+        "Os apontamentos existentes deste setor não serão excluídos.",
+        [{"id": "del_confirm_yes", "title": "✅ Confirmar"},
+         {"id": "del_confirm_no",  "title": "❌ Cancelar"}])
+    _set_session_clean(chat_id, "msm_remove_confirm",
+                       {"meta": meta, "sector_id": sector_id, "sector_name": sector["name"]})
+
+
+async def handle_msm_remove_confirm(chat_id: int, user: dict, text: str, data: dict) -> None:
+    if text == "del_confirm_yes":
+        unlink_sector_from_meta(data["meta"]["id"], data["sector_id"])
+        await send_text(chat_id,
+            f"✅ Setor *{data['sector_name']}* desvinculado da meta *{data['meta']['display_name']}*.")
+    else:
+        await send_text(chat_id, "❌ Cancelado.")
     await show_admin_menu(chat_id, user)
 
 

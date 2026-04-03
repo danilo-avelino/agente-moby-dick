@@ -227,6 +227,22 @@ def update_user_chat_id(phone: str, chat_id: int) -> None:
 # EXCLUSÕES (Admin)
 # ─────────────────────────────────────────────────────────
 
+def link_sector_to_meta(meta_config_id: int, sector_id: int) -> None:
+    try:
+        get_client().table("bot_meta_sectors").insert(
+            {"meta_config_id": meta_config_id, "sector_id": sector_id}
+        ).execute()
+    except Exception:
+        pass  # Já vinculado — ignora conflito
+
+
+def unlink_sector_from_meta(meta_config_id: int, sector_id: int) -> None:
+    get_client().table("bot_meta_sectors").delete()\
+        .eq("meta_config_id", meta_config_id)\
+        .eq("sector_id", sector_id)\
+        .execute()
+
+
 def update_meta_target(meta_config_id: int, new_target: int) -> None:
     get_client().table("bot_meta_configs").update(
         {"target_value": new_target}
